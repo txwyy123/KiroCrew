@@ -4317,6 +4317,13 @@ async def handle_message(
                 # match still surfaces a (best-effort, non-enforcing) warning +
                 # audit.
                 if context_builder:
+                    # Resolve activation OFF the event loop (no-blocking-call-on-event-loop):
+                    # this native Slack permission path is async, so reading the push-verdict
+                    # keystone inline inside on_tool_call would open a file on the loop and
+                    # stall chat + heartbeat on a slow crew-home mount.
+                    from kiro_crew.security import resolve_push_verdict_activation
+
+                    _pv_activation = await asyncio.to_thread(resolve_push_verdict_activation)
                     tool_result = context_builder.hooks.on_tool_call(
                         event.title,
                         session_key=session_key,
@@ -4325,6 +4332,7 @@ async def handle_message(
                         mcp_server_name=event.mcp_server_name,
                         mcp_tool_name=event.tool_name,
                         mcp_identity_trusted=event.mcp_identity_trusted,
+                        push_verdict_activation=_pv_activation,
                     )
                     if tool_result.action == TOOL_DENY:
                         # event.title is LLM-authored (select_tool_title prefers
@@ -4464,10 +4472,17 @@ async def handle_message(
             elif event.kind == EVENT_PERMISSION_REQUEST:
                 # Check tool hooks for auto-approve
                 if context_builder:
+                    # Resolve activation OFF the event loop (no-blocking-call-on-event-loop),
+                    # same as the informational site above: the keystone read must not run on
+                    # the loop in this async native Slack permission path.
+                    from kiro_crew.security import resolve_push_verdict_activation
+
+                    _pv_activation = await asyncio.to_thread(resolve_push_verdict_activation)
                     tool_result = context_builder.hooks.on_tool_call(
                         event.title,
                         session_key=session_key,
                         agent=_agent or "",
+                        push_verdict_activation=_pv_activation,
                         **hook_gate_kwargs(event),
                     )
                     if tool_result.action == TOOL_AUTO_APPROVE:

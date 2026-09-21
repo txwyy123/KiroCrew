@@ -540,6 +540,7 @@ from kiro_crew.security import (
     redact_credentials,
     redact_exfiltration_urls,
     redact_exfiltration_urls_with_records,
+    resolve_push_verdict_activation,
     sanitized_oauth_endpoint,
 )
 from kiro_crew.security.credential_sources import credential_records
@@ -12420,17 +12421,31 @@ async def _run_chat(
                     # so the security gate evaluates what actually executes.
                     # event.title may be an LLM-authored description that hides
                     # a dangerous command (see HookManager.on_tool_call).
-                    tool_result = state.context_builder.hooks.on_tool_call(
+                    #
+                    # Resolve the push-verdict activation keystone ONCE off the loop and pass it
+                    # in, the way the channel/task/planner/subagent turns do
+                    # (``resolve_push_verdict_activation`` -> ``push_verdict_activation=``). The
+                    # keystone read (an ``open`` + JSON parse of a leaf under the crew data home,
+                    # deliberately live per publish -- see ``push_verdict.activation()``) is the
+                    # only part that can stall on a network-mounted data home, and this permission
+                    # handler runs inline on the gateway loop; resolving it in a worker thread
+                    # keeps that read off the loop without a per-tool-call thread hop around the
+                    # whole synchronous gate.
+                    _resolved_agent = read_effective_agent(client)
+                    _hooks = state.context_builder.hooks
+                    _pv_activation = await asyncio.to_thread(resolve_push_verdict_activation)
+                    tool_result = _hooks.on_tool_call(
                         event.title,
                         session_key=session_key,
                         agent=slot.agent or "",
                         app=slot._app or "",
+                        push_verdict_activation=_pv_activation,
                         **hook_gate_kwargs(event),
                         # The RESOLVED agent (what actually served the turn), not
                         # slot.agent — that is an alias resolve_agent_bindings
                         # maps to a concrete kiro agent, so it must never decide
                         # which builtin app an agent belongs to.
-                        resolved_agent=read_effective_agent(client),
+                        resolved_agent=_resolved_agent,
                     )
                     if tool_result.action == TOOL_DENY:
                         # Surface WHY: carry the deny reason into the pill so

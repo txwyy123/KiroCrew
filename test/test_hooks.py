@@ -509,7 +509,18 @@ class TestHookGateKwargs:
     # asking, on whose behalf, in which mode) rather than the tool call. Every
     # other keyword parameter is derived from the event, and the parity test
     # below demands the helper emit exactly those.
-    SURFACE_KWARGS = frozenset({"session_key", "agent", "app", "resolved_agent", "classifier_only"})
+    SURFACE_KWARGS = frozenset(
+        {
+            "session_key",
+            "agent",
+            "app",
+            "resolved_agent",
+            "classifier_only",
+            # Pre-resolved push-verdict activation an async caller reads OFF the loop and
+            # passes in (see security.resolve_push_verdict_activation); not event-derived.
+            "push_verdict_activation",
+        }
+    )
 
     # The gate's event-derived parameters and the event attribute each reads.
     # A new entry here means a new enforcement signal; the parity test below
@@ -831,6 +842,74 @@ class TestHookGateKwargs:
         # table too, or the table drifts into fiction.
         for rel in self.INFORMATIONAL_SITES | set(self.ALLOWED_OVERRIDES):
             assert (root / rel).exists(), rel
+
+
+class TestGateConsultRunsOffTheEventLoop:
+    """STRUCTURAL: the interactive gate's keystone read runs OFF the event loop.
+
+    ``on_tool_call`` reaches the git-publish floor, which on a git-publish command reads
+    the push-verdict activation keystone (an ``open`` + JSON parse under the crew data home).
+    The read is deliberately live per publish (no cache -- see ``push_verdict.activation()``),
+    so on an activated, network-mounted data home it can stall. The two inline on-loop
+    permission handlers -- the dashboard chat runner and the webhook hook runner -- must keep
+    that read off the loop so a slow keystone read cannot freeze the gateway loop and its
+    heartbeat.
+
+    They do it the way the eight channel/task/planner/subagent callers do: resolve the keystone
+    ONCE off the loop (``await asyncio.to_thread(resolve_push_verdict_activation)``) and pass the
+    result into ``on_tool_call`` as ``push_verdict_activation=``, so the synchronous gate does no
+    keystone read at all. That removes the per-call thread hop an earlier version wrapped around
+    the whole consult (which duplicated the pass-in the other eight sites already use).
+
+    The pin is textual on purpose: the only thing that keeps the blocking read off the loop is
+    resolving the activation off-loop before the gate call. A future edit that drops the
+    off-loop resolution and lets the gate read the keystone inline again would re-open the stall
+    this fix closed -- and nothing else would fail. Mutation check: delete either
+    ``to_thread(resolve_push_verdict_activation)`` resolution and the matching assertion flips.
+    """
+
+    SITES = (
+        "dashboard/chat_runner.py",
+        "dashboard/handlers/hooks.py",
+    )
+
+    @staticmethod
+    def _resolves_activation_off_loop(text: str) -> bool:
+        """True when the site resolves the push-verdict activation keystone OFF the loop and
+        passes it into the gate, rather than letting the synchronous gate do the keystone read
+        inline on the loop. The off-loop pattern the inline sites share with the eight channel/
+        task/planner/subagent callers: ``await asyncio.to_thread(resolve_push_verdict_activation)``
+        resolves the keystone in a worker thread, then its result is handed to ``on_tool_call``
+        as ``push_verdict_activation=``. The gate itself then performs no keystone read, so the
+        only thing that could stall the loop (the ``open`` + JSON parse) is already off it --
+        with no per-call thread hop wrapping the whole consult."""
+        import re
+
+        resolves_off_loop = (
+            re.search(r"await asyncio\.to_thread\(\s*resolve_push_verdict_activation\s*\)", text)
+            is not None
+        )
+        passes_it_in = re.search(r"push_verdict_activation\s*=", text) is not None
+        return resolves_off_loop and passes_it_in
+
+    def test_interactive_consults_run_in_a_worker_thread(self):
+        from pathlib import Path
+
+        import kiro_crew
+
+        root = Path(kiro_crew.__file__).resolve().parent
+        offenders: list[str] = []
+        for rel in self.SITES:
+            path = root / rel
+            assert path.exists(), rel
+            text = path.read_text(encoding="utf-8")
+            if not self._resolves_activation_off_loop(text):
+                offenders.append(
+                    f"{rel}: the push-verdict activation keystone is not resolved off-loop via "
+                    f"`await asyncio.to_thread(resolve_push_verdict_activation)` and passed in as "
+                    f"`push_verdict_activation=`"
+                )
+        assert not offenders, "\n".join(offenders)
 
 
 class TestToolCallEvaluatesRawCommand:

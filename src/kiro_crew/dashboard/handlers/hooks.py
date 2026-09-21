@@ -30,7 +30,11 @@ from kiro_crew.permission_floor import (
     OUTCOME_PENDING_APPROVAL,
     OUTCOME_REJECTED_TRANSPORT_FLOOR,
 )
-from kiro_crew.security import redact_credentials, redact_exfiltration_urls
+from kiro_crew.security import (
+    redact_credentials,
+    redact_exfiltration_urls,
+    resolve_push_verdict_activation,
+)
 from kiro_crew.validation import sanitize_string
 
 logger = logging.getLogger(__name__)
@@ -1283,10 +1287,20 @@ async def _run_hook_inner(
             hooks_gate = getattr(state.context_builder, "hooks", None)
             if hooks_gate is not None:
                 try:
+                    # Resolve the push-verdict activation keystone ONCE off the loop and pass it
+                    # in, the way the channel/task/planner/subagent turns do
+                    # (``resolve_push_verdict_activation`` -> ``push_verdict_activation=``). The
+                    # keystone read (an ``open`` + JSON parse of a leaf under the crew data home,
+                    # deliberately live per publish -- see ``activation()``) is the only part that
+                    # can stall on a network-mounted data home, and this hook runs inline on the
+                    # gateway loop; resolving it in a worker thread keeps that read off the loop
+                    # without a per-call thread hop around the whole synchronous gate.
+                    _pv_activation = await asyncio.to_thread(resolve_push_verdict_activation)
                     decision = hooks_gate.on_tool_call(
                         event.title,
                         session_key=session_key,
                         agent=agent or "",
+                        push_verdict_activation=_pv_activation,
                         **hook_gate_kwargs(event),
                     )
                 except Exception:
