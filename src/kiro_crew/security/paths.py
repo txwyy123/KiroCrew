@@ -3257,6 +3257,7 @@ def _path_in_home_dirs(
     *,
     strict: bool = False,
     pre_resolved: bool = False,
+    anchors_inline: bool | None = None,
 ) -> bool:
     """Return True if *path_str* resolves under any of *home_dirs* (``$HOME``-relative).
 
@@ -3290,15 +3291,25 @@ def _path_in_home_dirs(
     such a caller is by contract on its own worker thread, so the anchors are
     resolved inline as well (``_home_dir_targets(inline=True)``): the whole
     check then performs no ``mc-pathres`` submission.
+
+    ``anchors_inline`` decouples the ANCHOR resolution from the candidate's
+    ``pre_resolved`` form, for the one caller that has both: a canonical
+    candidate (so its tail is matched lexically and never re-resolved) that
+    nonetheless runs ON the event loop (so the ``$HOME`` anchors must go through
+    the bounded ``mc-pathres`` pool, not an unbounded inline ``realpath`` a
+    stalled share could hang). ``None`` (every other caller) keeps the historic
+    coupling ``anchors_inline == pre_resolved``.
     """
     if not path_str:
         return False
+    if anchors_inline is None:
+        anchors_inline = pre_resolved
 
     try:
         candidates = _candidate_forms(path_str, base_dir, pre_resolved=pre_resolved)
         # The anchors are bounded the same way (see _rebuild_targets_bounded):
         # a stall with no prior canonical resolution to serve refuses too.
-        sensitive_targets = _home_dir_targets(home_dirs, inline=pre_resolved)
+        sensitive_targets = _home_dir_targets(home_dirs, inline=anchors_inline)
     except PathResolutionStalled:
         # Canonical form unavailable (wedged mount under the path): refuse.  A
         # lexical-only match here would pass a workspace symlink into a
@@ -3331,6 +3342,7 @@ def _is_keystone_publish_artifact(
     *,
     strict: bool = False,
     pre_resolved: bool = False,
+    anchors_inline: bool | None = None,
 ) -> bool:
     """Return True if *path_str* is the atomic-write temp or lock beside a keystone leaf.
 
@@ -3354,8 +3366,10 @@ def _is_keystone_publish_artifact(
     """
     if not path_str:
         return False
+    if anchors_inline is None:
+        anchors_inline = pre_resolved
     try:
-        artifact_parents = _home_dir_targets(_KEYSTONE_ARTIFACT_PARENTS, inline=pre_resolved)
+        artifact_parents = _home_dir_targets(_KEYSTONE_ARTIFACT_PARENTS, inline=anchors_inline)
         candidates = _candidate_forms(path_str, base_dir, pre_resolved=pre_resolved)
     except PathResolutionStalled:
         if strict:
@@ -3445,6 +3459,41 @@ def is_sensitive_resolved_path(resolved: str) -> bool:
     return _path_in_home_dirs(resolved, _SENSITIVE_HOME_DIRS, pre_resolved=True) or (
         resolved.casefold().endswith(_KEYSTONE_ARTIFACT_SUFFIXES)
         and _is_keystone_publish_artifact(resolved, pre_resolved=True)
+    )
+
+
+def is_sensitive_prevalidated_bounded_path(resolved: str) -> bool:
+    """:func:`is_sensitive_resolved_path`, but with the ANCHORS resolved BOUNDED.
+
+    The one fence for a caller that has a canonical candidate it must NOT
+    re-resolve, yet runs ON the event loop. ``is_sensitive_resolved_path`` fits
+    the first half (the candidate is matched lexically, never re-resolved -- so a
+    swapped unheld tail is never handed to ``realpath``) but resolves the
+    ``$HOME`` anchors INLINE, which on the event loop is an unbounded
+    filesystem call a stalled network-backed home would hang -- freezing the
+    gateway. This resolves the anchors through the bounded ``mc-pathres`` pool
+    instead (``anchors_inline=False``), so a wedged mount costs the pool's time
+    limit rather than the whole loop, while the candidate stays lexical.
+
+    Used by BOTH arms of the Windows held-chain validator. On ``CHAIN_HELD`` the
+    whole path is proven and ``_canonicalize_within_hold`` returns the leaf's own
+    descriptor path (``fd_real_path``); on ``CHAIN_MISSING`` it returns a canonical
+    prefix with the unproven tail joined as text. Either way the candidate is already
+    canonical and must NOT be re-resolved -- a by-name ``is_sensitive_path`` here would
+    hand ``realpath`` a name a junction could have been swapped onto after the walk,
+    the outbound SMB probe the walk exists to prevent. The arm runs synchronously
+    inside whatever (often on-loop) caller reached ``validate_file_path``, and the
+    bound is why that arm does not need every such caller offloaded.
+
+    *resolved* MUST be the canonical spelling, same contract as
+    :func:`is_sensitive_resolved_path`: the candidate half is still lexical, only
+    the anchor resolution is bounded rather than inline.
+    """
+    return _path_in_home_dirs(
+        resolved, _SENSITIVE_HOME_DIRS, pre_resolved=True, anchors_inline=False
+    ) or (
+        resolved.casefold().endswith(_KEYSTONE_ARTIFACT_SUFFIXES)
+        and _is_keystone_publish_artifact(resolved, pre_resolved=True, anchors_inline=False)
     )
 
 
