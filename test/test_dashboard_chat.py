@@ -17290,8 +17290,17 @@ class TestStopTurnSlotState:
         captured_states: list[str] = []
 
         async def fake_stop_turn(
-            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+            key,
+            *,
+            force=False,
+            preserve_queue=False,
+            on_soft=None,
+            on_hard=None,
+            goal_state,
+            pause_goal,
         ):
+            assert goal_state is state
+            assert pause_goal is True
             captured_states.append(slot._stop_state)
             if on_soft:
                 await on_soft()
@@ -17316,8 +17325,17 @@ class TestStopTurnSlotState:
         slot.task = asyncio.ensure_future(asyncio.sleep(999))
 
         async def fake_stop_turn(
-            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+            key,
+            *,
+            force=False,
+            preserve_queue=False,
+            on_soft=None,
+            on_hard=None,
+            goal_state,
+            pause_goal,
         ):
+            assert goal_state is state
+            assert pause_goal is True
             if on_hard:
                 await on_hard()
             return "hard"
@@ -17343,8 +17361,9 @@ class TestStopTurnSlotState:
         force_called = []
 
         async def fake_stop_turn(
-            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None, goal_state=None
         ):
+            assert goal_state is state
             force_called.append(force)
             if on_hard:
                 await on_hard()
@@ -17376,8 +17395,9 @@ class TestStopTurnSlotState:
         force_called = []
 
         async def fake_stop_turn(
-            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None, goal_state=None
         ):
+            assert goal_state is state
             force_called.append(force)
             if on_hard:
                 await on_hard()
@@ -17405,8 +17425,17 @@ class TestStopTurnSlotState:
         slot._queue.extend(["msg1", "msg2"])
 
         async def fake_stop_turn(
-            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+            key,
+            *,
+            force=False,
+            preserve_queue=False,
+            on_soft=None,
+            on_hard=None,
+            goal_state,
+            pause_goal,
         ):
+            assert goal_state is state
+            assert pause_goal is True
             assert preserve_queue is True
             if on_soft:
                 await on_soft()
@@ -17432,8 +17461,9 @@ class TestStopTurnSlotState:
             slot.queue_append(content)
 
         async def fake_stop_turn(
-            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None, goal_state=None
         ):
+            assert goal_state is state
             if on_hard:
                 await on_hard()
             return "hard"
@@ -17456,8 +17486,17 @@ class TestStopTurnSlotState:
         assert len(slot._queue) == 0
 
         async def fake_stop_turn(
-            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+            key,
+            *,
+            force=False,
+            preserve_queue=False,
+            on_soft=None,
+            on_hard=None,
+            goal_state,
+            pause_goal,
         ):
+            assert goal_state is state
+            assert pause_goal is True
             assert preserve_queue is True
             if on_soft:
                 await on_soft()
@@ -17482,8 +17521,9 @@ class TestStopTurnSlotState:
         assert len(slot._queue) == 0
 
         async def fake_stop_turn(
-            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None, goal_state=None
         ):
+            assert goal_state is state
             if on_hard:
                 await on_hard()
             return "hard"
@@ -17516,8 +17556,17 @@ class TestStopTurnSlotState:
         slot.task = asyncio.ensure_future(asyncio.sleep(999))
 
         async def fake_stop_turn(
-            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+            key,
+            *,
+            force=False,
+            preserve_queue=False,
+            on_soft=None,
+            on_hard=None,
+            goal_state,
+            pause_goal,
         ):
+            assert goal_state is state
+            assert pause_goal is True
             if on_soft:
                 await on_soft()
             return "soft"
@@ -17556,8 +17605,17 @@ class TestStopTurnSlotState:
         slot.task = asyncio.ensure_future(asyncio.sleep(999))
 
         async def fake_stop_turn(
-            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+            key,
+            *,
+            force=False,
+            preserve_queue=False,
+            on_soft=None,
+            on_hard=None,
+            goal_state,
+            pause_goal,
         ):
+            assert goal_state is state
+            assert pause_goal is True
             # Verify the stop_event was inserted before callbacks
             stop_msgs = [m for m in slot.messages if _is_stop_event(m)]
             assert len(stop_msgs) == 1
