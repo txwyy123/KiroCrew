@@ -89,7 +89,9 @@ Non-goals:
 
 ### 4.4 App SDK team capability
 
-One rule covers every item: a team is visible to an app only if its record carries that app's name in `app`, set by the host when the owner confirmed it. An app sees only its own teams — never another team, another crewmate, or any conversation text.
+One rule covers every item: a team is visible to an app only if its record carries that app's `app` stamp, set by the host when the owner confirmed it. An app sees only its own teams — never another team, another crewmate, or any conversation text.
+
+The stamp follows the install, not the name. Uninstalling the app clears `app` from every team it proposed, so the teams turn into ordinary owner teams. A later install under the same name gets no access to them: it shows its create card again, and the owner either links an existing team or creates a new one. While the app is disabled, `ctx.team` is not issued and its page is not mounted.
 
 | Capability | Seam | What the app author gets |
 |---|---|---|
@@ -97,7 +99,7 @@ One rule covers every item: a team is visible to an app only if its record carri
 | Read the tree | `handlers/teams.py`: only the tree route swaps `_deny_app_caller` for an own-team check; every other teams and members route keeps `_deny_app_caller` | `useTeamTree(teamId)` on the page; `ctx.team.tree(team_id)` in the backend |
 | Read goals | `handlers/work_ledger_board.py`: a read-only entry admitted only when the ledger's session is in the app's own team tree | `useTeamGoals` / `ctx.team.goals(team_id)`: lane goals, item titles, states, acceptance kinds — no worker report text |
 | Read the fold | New `apps/team_sdk.py`; `apps/context.py` adds `team: TeamSDK \| None`, set only when `permissions.team == "read"` and the manifest declares a team | `ctx.team.fold(team_id)`: the `team` fold, read-only |
-| Host components | `website/src/app-sdk/index.ts` exports `TeamView` and `TeamBoard`, following `ChatEmbed` | One line embeds the tree, Needs you and the board. Approval and question buttons live inside the component; the app gets no callback that can press them. The app cannot add board fields |
+| Host components | `website/src/app-sdk/index.ts` exports `TeamView` and `TeamBoard`, following `ChatEmbed` | One line embeds the tree, Needs you and the board, **read-only**. These components run in the app's page and call through `useAppApi()` with the app token, as `ChatEmbed` does, so they hold no owner authority. Each Needs you item carries an "Open in Kiro Crew" link to the host team view, where the owner answers or approves under the owner session. The app cannot add board fields |
 | Propose a seed | `ctx.team.propose_seed(team_id, text)` adds a card to the team's Needs you | "App X wants to send the lead: …". It is sent only when the owner clicks Send, through the existing thread path |
 
 Not in the SDK, by design: creating or editing a team, setting the lead, changing members, turning trust on or off, approving a tool call in a team session, sending to the lead directly. `permissions.sessionApproval` does not extend to sessions in a team that carries an `app`.
@@ -116,7 +118,7 @@ Each phase is one PR. The core phases come first; each app phase follows the cor
 | 4 Team mark and fold | `session/opened.team`; `team` fold in `projection.py` | A session opened under a lead carries the team id; removing a member later leaves the fold's history unchanged |
 | 5 Team board | `team-board` in `registry.py` with contract, provider, alignment test | A lead publish that writes a numeric field is refused; the board renders above the strip |
 | A1 Manifest + create card | `contributes.teams`; owner-confirmed create card | No team or crewmate exists until the owner clicks; the record carries `app` |
-| A2 Tree for apps | Own-team admission on the tree route; `useTeamTree`, `ctx.team.tree`, `TeamView` export | An app reading another app's team, or a team with no `app`, gets 404 |
+| A2 Tree for apps | Own-team admission on the tree route; `useTeamTree`, `ctx.team.tree`, read-only `TeamView` export; stamp cleared on uninstall | An app reading another app's team, or a team with no `app`, gets 404; an app-token approve or answer call on a team session is refused; after uninstall and reinstall under the same name, the old team is not visible |
 | A3 Goals and seed | Own-team read entry on the ledger board; `propose_seed` card | A proposed seed is not delivered until the owner clicks Send |
 | A4 Fold and board for apps | `apps/team_sdk.py`, `ctx.team.fold`, `TeamBoard` export | `ctx.team` is `None` without `permissions.team: read` |
 
@@ -132,7 +134,8 @@ Order: 1 → 2 → 3; 4 may run beside 1–3; 5 waits for 2 and 4; each A phase 
 
 - The tree route opened to apps exposes session state and counts for that app's own team only — no conversation text. Every other teams and members route keeps `_deny_app_caller`.
 - Team creation, lead, members and trust stay owner-only: `_require_owner` routes, sealed `crew-teams/`, no SDK call.
-- Approval stays in host-owned UI. A test pins that an app holding `sessionApproval` is refused when it tries to switch a team session to Trust.
+- Approval stays in host-owned UI. The embedded components are read-only and carry only the app token; answering a question or approving a tool call in a team session happens on the host team view. Two tests pin it: an app-token approve or answer call on a team session is refused, and an app holding `sessionApproval` is refused when it tries to switch a team session to Trust.
+- The `app` stamp is cleared on uninstall, so a later app reusing the name inherits no team.
 - Board numbers come from the fold; a lead cannot publish them.
 
 ## 8. Alternatives considered
