@@ -358,6 +358,7 @@ Decided:
   waiting on you."); **This week** (the team's work log, one line per item).
 - Rejected: a whole-crew view as the landing when no crewmate is selected, and
   a pinned "Your crew" roster entry.
+- Proposed amendment: [rfc-crewmate-team-lead.md](rfc-crewmate-team-lead.md) (status `draft`) adds an optional team lead, the lead's whole session tree, a fourth block (the team board) and an App SDK team capability. Until it is accepted, the three-block decision above stands.
 
 ## 5. Out of scope
 
